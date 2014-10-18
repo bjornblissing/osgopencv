@@ -7,32 +7,48 @@
 #include "opencvimagestream.h"
 #include <iostream>
 
-OpenCVImageStream::OpenCVImageStream() : m_videoCaptureDevice(0), m_init(false),
+OpenCVImageStream::OpenCVImageStream() : m_cameraThread(0) {}
+
+OpenCVImageStream::~OpenCVImageStream() {
+	if (m_cameraThread->isRunning()) {
+		m_cameraThread->cancel();
+	}
+	
+	delete m_cameraThread;
+}
+
+bool OpenCVImageStream::openCamera(int deviceId)
+{
+	m_cameraThread = new OpenCVCameraThread(deviceId);
+	m_cameraThread->start();
+	return true;
+}
+
+void OpenCVImageStream::update(osg::NodeVisitor* /*nv*/)
+{
+	if (m_cameraThread->initialized()) {
+		m_cameraThread->getData(m_frame);
+		this->setImage(m_cameraThread->sensorSizeX(), m_cameraThread->sensorSizeY(), 1, m_cameraThread->internalTextureFormat(), m_cameraThread->pixelFormat(), m_cameraThread->dataType(), (unsigned char*)(m_frame.data), osg::Image::NO_DELETE, 1);
+	}
+}
+
+OpenCVCameraThread::OpenCVCameraThread(int deviceId) : OpenThreads::Thread(), 
+	m_done(false),
+	m_videoCaptureDevice(0), 
+	m_init(false),
 	m_sensorSizeX(0),
 	m_sensorSizeY(0),
 	m_frameRate(0.0),
 	m_dataType(GL_UNSIGNED_BYTE),
 	m_pixelFormat(GL_BGR),
-	m_internalTextureFormat(GL_RGB)
-{
-}
-
-OpenCVImageStream::~OpenCVImageStream()
-{
-	if (m_videoCaptureDevice->isOpened()) {
-		m_videoCaptureDevice->release();
-	}
-	delete m_videoCaptureDevice;
-}
-
-bool OpenCVImageStream::openCamera(int deviceId)
+	m_internalTextureFormat(GL_RGB) 
 {
 	// Open video device
 	m_videoCaptureDevice = new cv::VideoCapture(deviceId);
-	
+
 	// check if we succeeded
-	if (!m_videoCaptureDevice->isOpened()) {  
-		return false;
+	if (!m_videoCaptureDevice->isOpened()) {
+		return;
 	}
 
 	// Get camera properties
@@ -45,7 +61,7 @@ bool OpenCVImageStream::openCamera(int deviceId)
 	m_videoCaptureDevice->retrieve(m_frame);
 	// Make sure that grabbed images is continous
 	if (!m_frame.isContinuous()) {
-		return false;
+		return;
 	}
 
 	// Get the data type of image
@@ -58,7 +74,7 @@ bool OpenCVImageStream::openCamera(int deviceId)
 			break;
 		default:
 			std::cerr << "Error: Unknown data type." << std::endl;
-			return false;
+			return;
 			break;
 	}
 
@@ -74,20 +90,44 @@ bool OpenCVImageStream::openCamera(int deviceId)
 			break;
 		default:
 			std::cerr << "Error: Unknown pixel format." << std::endl;
-			return false;
+			return;
 			break;
 	}
-	
 
 	m_init = true;
-	return true;
 }
 
-void OpenCVImageStream::update(osg::NodeVisitor* /*nv*/)
+void OpenCVCameraThread::run()
 {
-	if (m_init) {
-		m_videoCaptureDevice->grab();
-		m_videoCaptureDevice->retrieve(m_frame);
-		this->setImage(m_sensorSizeX, m_sensorSizeY, 1, m_internalTextureFormat, m_pixelFormat, m_dataType, (unsigned char*)(m_frame.data), osg::Image::NO_DELETE, 1);
+	while (!m_done) {
+		if (m_init) {
+			// Get new image
+			m_videoCaptureDevice->grab();
+			m_videoCaptureDevice->retrieve(m_frame);
+		}
+
+		OpenThreads::Thread::microSleep(1);
 	}
 }
+
+int OpenCVCameraThread::cancel()
+{
+	m_done = true;
+
+	// Release camera device
+	if (m_videoCaptureDevice->isOpened()) {
+		m_videoCaptureDevice->release();
+		
+	}
+	m_init = false;
+
+	delete m_videoCaptureDevice;
+
+	return 0;
+}
+
+void OpenCVCameraThread::getData(cv::Mat& frame) {
+	// Copy image in thread to frame
+	m_frame.copyTo(frame);
+}
+
