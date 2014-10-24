@@ -6,6 +6,7 @@
  */
 #include "opencvimagestream.h"
 #include <iostream>
+#include <OpenThreads/ScopedLock>
 
 OpenCVImageStream::OpenCVImageStream() : m_cameraThread(0) {}
 
@@ -26,7 +27,7 @@ bool OpenCVImageStream::openCamera(int deviceId)
 
 void OpenCVImageStream::update(osg::NodeVisitor* /*nv*/)
 {
-	if (m_cameraThread->initialized()) {
+	if (m_cameraThread->initialized() && m_cameraThread->newImageAvailable()) {
 		m_cameraThread->getData(m_frame);
 		this->setImage(m_cameraThread->sensorSizeX(), m_cameraThread->sensorSizeY(), 1, m_cameraThread->internalTextureFormat(), m_cameraThread->pixelFormat(), m_cameraThread->dataType(), (unsigned char*)(m_frame.data), osg::Image::NO_DELETE, 1);
 	}
@@ -34,6 +35,7 @@ void OpenCVImageStream::update(osg::NodeVisitor* /*nv*/)
 
 OpenCVCameraThread::OpenCVCameraThread(int deviceId) : OpenThreads::Thread(), 
 	m_done(false),
+	m_newImageAvailable(false),
 	m_videoCaptureDevice(0), 
 	m_init(false),
 	m_sensorSizeX(0),
@@ -58,14 +60,15 @@ OpenCVCameraThread::OpenCVCameraThread(int deviceId) : OpenThreads::Thread(),
 
 	// Grab one image to determine format
 	m_videoCaptureDevice->grab();
-	m_videoCaptureDevice->retrieve(m_frame);
-	// Make sure that grabbed images is continous
-	if (!m_frame.isContinuous()) {
+	m_videoCaptureDevice->retrieve(m_backBuffer);
+
+	// Make sure that grabbed images is continuous
+	if (!m_backBuffer.isContinuous()) {
 		return;
 	}
 
 	// Get the data type of image
-	switch (m_frame.depth()) {
+	switch (m_backBuffer.depth()) {
 		case CV_8U:
 			m_dataType = GL_UNSIGNED_BYTE;
 			break;
@@ -78,8 +81,8 @@ OpenCVCameraThread::OpenCVCameraThread(int deviceId) : OpenThreads::Thread(),
 			break;
 	}
 
-	// Get the pixelformat of image
-	switch (m_frame.channels()) {
+	// Get the pixel format of image
+	switch (m_backBuffer.channels()) {
 		case 3:
 			m_pixelFormat = GL_BGR;
 			m_internalTextureFormat = GL_RGB;
@@ -103,9 +106,15 @@ void OpenCVCameraThread::run()
 		if (m_init) {
 			// Get new image
 			m_videoCaptureDevice->grab();
-			m_videoCaptureDevice->retrieve(m_frame);
+			m_videoCaptureDevice->retrieve(m_backBuffer);
 		}
-
+		
+		{
+			OpenThreads::ScopedLock< OpenThreads::Mutex > lock( m_mutex );
+			m_backBuffer.copyTo(m_frontBuffer);
+			m_newImageAvailable = true;
+		}
+		
 		OpenThreads::Thread::microSleep(1);
 	}
 }
@@ -128,6 +137,12 @@ int OpenCVCameraThread::cancel()
 
 void OpenCVCameraThread::getData(cv::Mat& frame) {
 	// Copy image in thread to frame
-	m_frame.copyTo(frame);
+	OpenThreads::ScopedLock< OpenThreads::Mutex > lock( m_mutex );
+	m_frontBuffer.copyTo(frame);
+	m_newImageAvailable = false;
 }
 
+bool OpenCVCameraThread::newImageAvailable() {
+	OpenThreads::ScopedLock< OpenThreads::Mutex > lock( m_mutex );
+	return m_newImageAvailable;
+}

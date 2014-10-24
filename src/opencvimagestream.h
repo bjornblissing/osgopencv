@@ -10,6 +10,7 @@
 
 #include <osg/ImageStream>
 #include <OpenThreads/Thread>
+#include <OpenThreads/Mutex>
 
 #include <opencv2/opencv.hpp>
 
@@ -26,14 +27,18 @@ public:
 	GLenum pixelFormat() const { return m_pixelFormat; }
 	GLenum internalTextureFormat() const { return m_internalTextureFormat; }
 	void getData(cv::Mat& frame);
+	bool newImageAvailable();
 protected:
 	bool m_init;
 	bool m_done;
+	bool m_newImageAvailable;
 	cv::VideoCapture* m_videoCaptureDevice;
-	cv::Mat m_frame;
+	cv::Mat m_backBuffer;
+	cv::Mat m_frontBuffer;
 	int m_sensorSizeX;
 	int m_sensorSizeY;
 	double m_frameRate;
+	OpenThreads::Mutex m_mutex;
 	GLenum m_dataType;
 	GLenum m_pixelFormat;
 	GLenum m_internalTextureFormat;
