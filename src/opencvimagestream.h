@@ -27,7 +27,7 @@ public:
 	GLenum pixelFormat() const { return m_pixelFormat; }
 	GLenum internalTextureFormat() const { return m_internalTextureFormat; }
 	void getData(cv::Mat& frame);
-	bool newImageAvailable();
+	bool newImageAvailable() const { return m_newImageAvailable; }
 protected:
 	bool m_init;
 	bool m_done;

@@ -141,8 +141,3 @@ void OpenCVCameraThread::getData(cv::Mat& frame) {
 	m_frontBuffer.copyTo(frame);
 	m_newImageAvailable = false;
 }
-
-bool OpenCVCameraThread::newImageAvailable() {
-	OpenThreads::ScopedLock< OpenThreads::Mutex > lock( m_mutex );
-	return m_newImageAvailable;
-}
